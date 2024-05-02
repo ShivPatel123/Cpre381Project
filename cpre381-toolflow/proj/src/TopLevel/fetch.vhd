@@ -14,6 +14,7 @@ ENTITY FetchLogic IS
         i_IMM : IN STD_LOGIC_VECTOR(31 DOWNTO 0); --signed imm value after bitwidth extender
         i_RSDATA : IN STD_LOGIC_VECTOR (31 DOWNTO 0);
         i_JADDRESS : IN STD_LOGIC_VECTOR (31 DOWNTO 0);
+        i_PCPLUS4 : IN STD_LOGIC_VECTOR(31 DOWNTO 0);
         o_JALDATA : OUT STD_LOGIC_VECTOR(31 DOWNTO 0);
         o_IMEMADDRESS : OUT STD_LOGIC_VECTOR(31 DOWNTO 0)
     );
@@ -84,26 +85,29 @@ ARCHITECTURE structural OF FetchLogic IS
 
 BEGIN
 
-    PC1 : PC PORT MAP(
-        i_CLK => i_CLK,
-        i_WE => '1',
-        i_RST => i_RST,
-        i_ADDRESS => s_NEXTADDRESS,
-        o_ADDRESS => s_CURRENTADDRESS);
+    -- PC1 : PC PORT MAP(
+    --     i_CLK => i_CLK,
+    --     i_WE => '1',
+    --     i_RST => i_RST,
+    --     i_ADDRESS => s_NEXTADDRESS,
+    --     o_ADDRESS => s_CURRENTADDRESS);
+
+    -- o_IMEMADDRESS <= s_CURRENTADDRESS;
+
+    -- PCplus4 : addersubtractor_N
+    -- GENERIC MAP(n => 32)
+    -- PORT MAP(
+    --     i_A => s_CURRENTADDRESS, -- Current PC
+    --     i_B => (OTHERS => '0'), -- Unused for branch
+    --     i_Imm => X"00000004", -- Branch offset
+    --     i_Ctrl => '0',
+    --     i_ALUSrc => '1',
+    --     o_sum => s_PCPLUS4, -- Result of addition
+    --     o_cout => OPEN -- Unused for branch
+    -- );
 
     o_IMEMADDRESS <= s_CURRENTADDRESS;
-
-    PCplus4 : addersubtractor_N
-    GENERIC MAP(n => 32)
-    PORT MAP(
-        i_A => s_CURRENTADDRESS, -- Current PC
-        i_B => (OTHERS => '0'), -- Unused for branch
-        i_Imm => X"00000004", -- Branch offset
-        i_Ctrl => '0',
-        i_ALUSrc => '1',
-        o_sum => s_PCPLUS4, -- Result of addition
-        o_cout => OPEN -- Unused for branch
-    );
+    s_CURRENTADDRESS <= i_PCPLUS4;
 
     JALOutput : addersubtractor_N
     GENERIC MAP(n => 32)

@@ -192,38 +192,38 @@ ARCHITECTURE structure OF MIPS_Processor IS
   SIGNAL s_Ovfl : STD_LOGIC; -- TODO: this signal indicates an overflow exception would have been initiated
 
   --control file signals
-  SIGNAL s_RegDst, s_Unsigned, s_AluSrc, s_MemToReg, s_J, s_JAL, s_JR, s_LuiIndex : STD_LOGIC;
+  SIGNAL s_RegDst, s_Unsigned, s_Extender, s_Signed, s_AluSrc, s_MemToReg, s_J, s_JAL, s_JR, s_LuiIndex : STD_LOGIC;
   SIGNAL s_AluOp : STD_LOGIC_VECTOR(3 DOWNTO 0);
   SIGNAL s_Branch : STD_LOGIC_VECTOR(1 DOWNTO 0);
   --ALU file Signals
-  SIGNAL s_AluRsInput, s_LuiImm, s_AluOutput, s_AluRtInput, s_ImmTemp : STD_LOGIC_VECTOR(N - 1 DOWNTO 0);
-  SIGNAL s_Cout, s_RegWrDecode, s_ZeroAlu, s_Jump, s_DMemWrTemp : STD_LOGIC;
+  SIGNAL s_AluRsInput, s_LuiImm, s_AluOutput, s_AluRtInput, s_ImmTemp, s_MUXOUT, s_UnmaskedLui, s_Lower, s_Lui, s_LuiAddress, s_BranchComparison : STD_LOGIC_VECTOR(N - 1 DOWNTO 0);
+  SIGNAL s_Cout, s_Zero, s_SWJ, s_NotAndi, s_RegWrDecode, s_ZeroAlu, s_Jump : STD_LOGIC;
 
   --fetch signals
-  SIGNAL s_JumpAddress, s_MemToRegData, s_ZeroChecker, s_LuiOrData, s_RegData, s_BranchAddress, s_BranchTemp, s_Target, s_TargetAddress, s_RegWriteData, s_BranchOrNext : STD_LOGIC_VECTOR(N - 1 DOWNTO 0);
-  SIGNAL s_RegDest, s_RdorRt : STD_LOGIC_VECTOR(4 DOWNTO 0);
+  SIGNAL s_JumpAddress, s_ZeroChecker, s_LuiOrData, s_JalData, s_RegData, s_BranchAddress, s_BranchTemp, s_Target, s_TargetAddress, s_RegWriteData, s_BranchOrNext : STD_LOGIC_VECTOR(N - 1 DOWNTO 0);
+  SIGNAL s_JalTemp, s_JTemp, s_RegDest, s_RdorRt : STD_LOGIC_VECTOR(4 DOWNTO 0);
 
   --Pipeline register signals
   SIGNAL s_Fetch : STD_LOGIC_VECTOR(63 DOWNTO 0);
   SIGNAL s_Decode : STD_LOGIC_VECTOR(176 DOWNTO 0);
   SIGNAL s_Execute : STD_LOGIC_VECTOR(105 DOWNTO 0);
   SIGNAL s_Memory : STD_LOGIC_VECTOR(38 DOWNTO 0);
-  SIGNAL s_CURRENTADDRESS, s_PCPLUS4 : STD_LOGIC_VECTOR(N - 1 DOWNTO 0);
+  SIGNAL s_CURRENTADDRESS, s_NEXTADDRESS, s_PCPLUS4 : STD_LOGIC_VECTOR(N - 1 DOWNTO 0);
 
 BEGIN
 
   -- TODO: This is required to be your final input to your instruction memory. This provides a feasible method to externally load the memory module which means that the synthesis tool must assume it knows nothing about the values stored in the instruction memory. If this is not included, much, if not all of the design is optimized out because the synthesis tool will believe the memory to be all zeros.
   --IF/ID Stage
 
-  -- s_NextInstAddr <= s_TargetAddress WHEN iRST = '0' ELSE
-  --   x"00000000";
+  s_NextInstAddr <= s_TargetAddress WHEN iRST = '1' ELSE
+    x"00400000";
 
   PC1 : PC
   PORT MAP(
     i_CLK => iCLK,
     i_WE => '1',
     i_RST => iRST,
-    i_ADDRESS => s_TargetAddress,
+    i_ADDRESS => s_NextInstAddr,
     o_ADDRESS => s_CURRENTADDRESS);
 
   PCplus4 : addersubtractor_N
@@ -238,10 +238,8 @@ BEGIN
     o_cout => OPEN -- Unused for branch
   );
 
-  s_NextInstAddr <= s_CURRENTADDRESS;
-
   WITH iInstLd SELECT
-    s_IMemAddr <= s_NextInstAddr WHEN '0',
+    s_IMemAddr <= s_CURRENTADDRESS WHEN '0',
     iInstAddr WHEN OTHERS;
   IMem : mem
   GENERIC MAP(
@@ -256,7 +254,7 @@ BEGIN
 
   -- current address 32 bits 63 to 32
   -- instruction code 32 bits 32 to 0
-  Fetch : n_bit_reg
+  IFID : n_bit_reg
   GENERIC MAP(N => 64)
   PORT MAP(
     i_D (31 DOWNTO 0) => s_Inst,
@@ -326,14 +324,14 @@ BEGIN
 
   ControlUnit : control
   PORT MAP(
-    i_Op => s_Fetch(31 DOWNTO 26),
-    i_Funct => s_Fetch(5 DOWNTO 0),
+    i_Op => s_Decode(31 DOWNTO 26),
+    i_Funct => s_Decode(5 DOWNTO 0),
     o_RegDst => s_RegDst, -- rt vs rd for different instruction types
     o_J => s_J, -- jump operation
     o_Branch => s_Branch, -- 0: no branch 1: beq 2: bne
     o_AxMOut => s_MemToReg, -- picks between ALUOut and MemOut for the datat to write back
     o_ALUOp => s_AluOp, -- ALUOp
-    o_MemWrite => s_DMemWrTemp, -- Memory's WE
+    o_MemWrite => s_DMemWr, -- Memory's WE
     o_ALUSrc => s_AluSrc, -- Picks between immidiate value and register operand
     o_Unsigned => s_Unsigned, -- 1 if unisigned instructions
     o_Jr => s_Jr, -- jr instruction
@@ -379,12 +377,12 @@ BEGIN
   s_ZeroAlu <= '1' WHEN s_ZeroChecker = X"00000000" ELSE
     '0';
 
-  s_BranchYesOrNo <= (s_Branch(0) AND s_ZeroAlu) OR (s_Branch(1) AND (NOT s_ZeroAlu));
+  s_BranchYesOrNo <= (s_Decode(130) AND s_ZeroAlu) OR (s_Decode(131) AND (NOT s_ZeroAlu));
 
   Branchselector : mux2t1_N
   GENERIC MAP(N => 32)
   PORT MAP(
-    i_D0 => s_PCPLUS4,
+    i_D0 => s_Decode(63 DOWNTO 32),
     i_D1 => s_BranchAddress,
     i_S => s_BranchYesOrNo,
     o_O => s_BranchOrNext
@@ -424,7 +422,7 @@ BEGIN
     i_D(131 DOWNTO 130) => s_Branch,
     i_D(132) => s_MemToReg,
     i_D(136 DOWNTO 133) => s_AluOp,
-    i_D(137) => s_DMemWrTemp,
+    i_D(137) => s_DMemWr,
     i_D(138) => s_AluSrc,
     i_D(139) => s_Unsigned,
     i_D(140) => s_Jr,
@@ -461,11 +459,11 @@ BEGIN
   PORT MAP(
     i_RSDATA => s_Decode(95 DOWNTO 64),
     i_RTDATA => s_Decode(127 DOWNTO 96),
-    i_IMM => s_Decode(176 DOWNTO 145),
+    i_IMM => s_ImmTemp,
     i_ALUOP => s_Decode(136 DOWNTO 133),
     i_ALUSRC => s_Decode(138),
     i_SHAMT => s_Decode(10 DOWNTO 6),
-    o_RESULT => oALUOut,
+    o_RESULT => s_AluOutput,
     o_CARRYOUT => s_Cout,
     o_OVERFLOW => s_Ovfl,
     o_ZERO => OPEN -- used for branch comparison
@@ -473,7 +471,7 @@ BEGIN
   JalWrite : mux2t1_N
   GENERIC MAP(N => 32)
   PORT MAP(
-    i_D0 => oALUOut,
+    i_D0 => s_AluOutput,
     i_D1 => s_Decode(63 DOWNTO 32),
     i_S => s_Decode(141),
     o_O => s_RegData
@@ -485,7 +483,7 @@ BEGIN
     i_D (31 DOWNTO 0) => s_RegData,
     i_D (63 DOWNTO 32) => s_Decode(127 DOWNTO 96),
     i_D (68 DOWNTO 64) => s_RegDest,
-    i_D (69) => s_Decode(137), --MemWe
+    i_D (69) => s_Decode(137),
     i_D(70) => s_Decode(143), --halt
     i_D(71) => s_Decode(132), --memtoreg
     i_D(72) => s_Decode(142), --reg write
@@ -499,7 +497,7 @@ BEGIN
   --MEM Stage
   s_DMemData <= s_Execute(63 DOWNTO 32);
   s_DMemAddr <= s_Execute(31 DOWNTO 0);
-  s_DMemWr <= s_Execute(69);
+  s_DMemWr <= s_Execute(72);
   DMem : mem
   GENERIC MAP(
     ADDR_WIDTH => ADDR_WIDTH,
@@ -518,27 +516,14 @@ BEGIN
     i_D0 => s_Execute(31 DOWNTO 0),
     i_D1 => s_Execute(63 DOWNTO 32),
     o_O => s_LuiOrData);
-
-  memtoreg2 : mux2t1_N
-  PORT MAP(
-    i_S => s_Execute(71),
-    i_D0 => s_LuiOrData,
-    i_D1 => s_DMemOut,
-    o_O => s_MemToRegData
-  );
   s_LuiImm <= s_Execute(89 DOWNTO 74) & X"0000";
   lui : mux2t1_N
   PORT MAP(
     i_S => s_Execute(73),
-    i_D0 => s_MemToRegData,
+    i_D0 => s_LuiOrData,
     i_D1 => s_LuiImm,
     o_O => s_RegWriteData
   );
-
-  -- s_RegWr <= s_Execute(72);
-  -- s_RegWrAddr <= s_Execute (68 DOWNTO 64);
-  -- s_RegWrData <= s_RegWriteData;
-  -- s_Halt <= s_Execute(70);
 
   Memory : n_bit_reg
   GENERIC MAP(N => 39)

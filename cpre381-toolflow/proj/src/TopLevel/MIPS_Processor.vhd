@@ -131,6 +131,21 @@ ARCHITECTURE structure OF MIPS_Processor IS
       o_Q : OUT STD_LOGIC_VECTOR(N - 1 DOWNTO 0)
     );
   END COMPONENT;
+  COMPONENT hazard_detector IS
+    PORT (
+      i_clk : IN STD_LOGIC;
+      i_RsAddress : IN STD_LOGIC_VECTOR(4 DOWNTO 0);
+      i_RtAddress : IN STD_LOGIC_VECTOR(4 DOWNTO 0);
+      i_RdAddress : IN STD_LOGIC_VECTOR(4 DOWNTO 0);
+      i_RdAddressEx : IN STD_LOGIC_VECTOR(4 DOWNTO 0);
+      i_RegWr : IN STD_LOGIC;
+      i_RegWrEx : IN STD_LOGIC;
+      i_J : IN STD_LOGIC;
+      i_BranchYesOrNo : IN STD_LOGIC;
+      o_Flush : OUT STD_LOGIC;
+      o_Stall : OUT STD_LOGIC
+    );
+  END COMPONENT;
   COMPONENT control IS
     PORT (
       i_Op : IN STD_LOGIC_VECTOR(5 DOWNTO 0);
@@ -167,6 +182,7 @@ ARCHITECTURE structure OF MIPS_Processor IS
       o_O : OUT STD_LOGIC_VECTOR(N - 1 DOWNTO 0));
 
   END COMPONENT;
+
   -- TODO: You may add any additional signals or components your implementation 
   --       requires below this comment
 
@@ -186,18 +202,18 @@ ARCHITECTURE structure OF MIPS_Processor IS
   SIGNAL s_Inst : STD_LOGIC_VECTOR(N - 1 DOWNTO 0); -- TODO: use this signal as the instruction signal 
 
   -- Required halt signal -- for simulation
-  SIGNAL s_Halt, s_HaltTemp, s_BranchYesOrNo : STD_LOGIC; -- TODO: this signal indicates to the simulation that intended program execution has completed. (Opcode: 01 0100)
-
+  SIGNAL s_Halt, s_HaltTemp, s_BranchYesOrNo, s_Extender, s_PCJump, s_Flush, s_FetchReset, s_StallTemp : STD_LOGIC; -- TODO: this signal indicates to the simulation that intended program execution has completed. (Opcode: 01 0100)
+  SIGNAL s_Stall : STD_LOGIC := '0';
   -- Required overflow signal -- for overflow exception detection
   SIGNAL s_Ovfl : STD_LOGIC; -- TODO: this signal indicates an overflow exception would have been initiated
 
   --control file signals
   SIGNAL s_RegDst, s_Unsigned, s_AluSrc, s_MemToReg, s_J, s_JAL, s_JR, s_LuiIndex : STD_LOGIC;
   SIGNAL s_AluOp : STD_LOGIC_VECTOR(3 DOWNTO 0);
-  SIGNAL s_Branch : STD_LOGIC_VECTOR(1 DOWNTO 0);
+  SIGNAL s_Branch, alu_select_a, alu_select_b : STD_LOGIC_VECTOR(1 DOWNTO 0);
   --ALU file Signals
-  SIGNAL s_AluRsInput, s_LuiImm, s_AluOutput, s_AluRtInput, s_ImmTemp : STD_LOGIC_VECTOR(N - 1 DOWNTO 0);
-  SIGNAL s_Cout, s_RegWrDecode, s_ZeroAlu, s_Jump, s_DMemWrTemp : STD_LOGIC;
+  SIGNAL s_AluRsInput, s_LuiImm, s_AluOutput, s_AluRtInput, s_ImmTemp, s_SignExtender, s_RsValue, s_RtValue, s_AluOutTemp : STD_LOGIC_VECTOR(N - 1 DOWNTO 0);
+  SIGNAL s_Cout, s_RegWrDecode, s_ZeroAlu, s_Jump, s_DMemWrTemp, s_NotAndi, s_StallExtend : STD_LOGIC;
 
   --fetch signals
   SIGNAL s_JumpAddress, s_MemToRegData, s_ZeroChecker, s_LuiOrData, s_RegData, s_BranchAddress, s_BranchTemp, s_Target, s_TargetAddress, s_RegWriteData, s_BranchOrNext : STD_LOGIC_VECTOR(N - 1 DOWNTO 0);
@@ -205,7 +221,7 @@ ARCHITECTURE structure OF MIPS_Processor IS
 
   --Pipeline register signals
   SIGNAL s_Fetch : STD_LOGIC_VECTOR(63 DOWNTO 0);
-  SIGNAL s_Decode : STD_LOGIC_VECTOR(176 DOWNTO 0);
+  SIGNAL s_Decode, s_DecodeValues, s_DecodeTemp : STD_LOGIC_VECTOR(176 DOWNTO 0);
   SIGNAL s_Execute : STD_LOGIC_VECTOR(105 DOWNTO 0);
   SIGNAL s_Memory : STD_LOGIC_VECTOR(38 DOWNTO 0);
   SIGNAL s_CURRENTADDRESS, s_PCPLUS4 : STD_LOGIC_VECTOR(N - 1 DOWNTO 0);
@@ -221,7 +237,7 @@ BEGIN
   PC1 : PC
   PORT MAP(
     i_CLK => iCLK,
-    i_WE => '1',
+    i_WE => NOT s_StallExtend,
     i_RST => iRST,
     i_ADDRESS => s_TargetAddress,
     o_ADDRESS => s_CURRENTADDRESS);
@@ -256,62 +272,44 @@ BEGIN
 
   -- current address 32 bits 63 to 32
   -- instruction code 32 bits 32 to 0
+
+  s_FetchReset <= s_Flush OR iRST;
+
+  s_StallTemp <= '1' WHEN(s_Stall) ELSE
+    '0' WHEN falling_edge(iCLK);
+
+  s_StallExtend <= '1' WHEN(s_StallTemp) ELSE
+    '0' WHEN rising_edge(iCLK);
+
   Fetch : n_bit_reg
   GENERIC MAP(N => 64)
   PORT MAP(
     i_D (31 DOWNTO 0) => s_Inst,
     i_D (63 DOWNTO 32) => s_PCPLUS4,
-    i_RST => iRST,
+    i_RST => s_FetchReset,
     i_CLK => iCLK,
-    i_WE => '1',
+    i_WE => NOT s_StallExtend,
     o_Q => s_Fetch
   );
 
-  --ID/EX Stage
+  s_PCJump <= s_Decode(140) OR s_Jump;
+  hazard_control : hazard_detector
+  PORT MAP(
+    i_clk => iCLK,
+    i_RsAddress => s_Fetch(25 DOWNTO 21),
+    i_RtAddress => s_Fetch(20 DOWNTO 16),
+    i_RdAddress => s_Execute (68 DOWNTO 64),
+    i_RdAddressEx => s_RegDest,
 
-  -- s_NotAndi <= '1' WHEN (NOT (s_Fetch(31 DOWNTO 26) = "001100")) ELSE
-  --   '0';
-  -- s_Extender <= '0' WHEN (s_Fetch(15) = '1' AND s_NotAndi = '1') ELSE
-  --   s_Unsigned;
-
-  -- SignExtender : bit_width_extender
-  -- PORT MAP(
-  --   signedval => s_Extender,
-  --   i_in => s_Fetch(15 DOWNTO 0),
-  --   o_out => s_ImmTemp);
-
-  -- brancheqcheck : addersubtractor_N
-  -- GENERIC MAP(N => 32)
-  -- PORT MAP(
-  --   i_A => s_Fetch(25 DOWNTO 21),
-  --   i_B => s_Fetch(20 DOWNTO 16),
-  --   i_Imm => X"00000000",
-  --   i_Ctrl => '1',
-  --   i_ALUSrc => '0',
-  --   o_sum => s_BranchComparison,
-  --   o_cout => OPEN
-  -- );
-
-  -- s_ZERO <= '1' WHEN s_BranchComparison = X"00000000" ELSE
-  --   '0';
-
-  -- fetch : FetchLogic
-  -- PORT MAP(
-  --   i_CLK => iCLK,
-  --   i_RST => iRST,
-  --   i_BRANCH => s_Branch,
-  --   i_JAL => s_Jal,
-
-  --   i_ZERO => s_Zero, --****NEED TO FIX IMPLEMENT COMPARATOR IN DECODE!!!!!****
-  --   i_PCPLUS4 => s_Fetch(63 DOWNTO 32),
-  --   i_JR => s_Jr,
-  --   i_J => s_J,
-  --   i_IMM => s_ImmTemp, --signed imm value after bitwidth extender
-  --   i_RSDATA => s_AluRsInput,
-  --   i_JADDRESS => s_JumpAddress,
-  --   o_JALDATA => s_JalData,
-  --   o_IMEMADDRESS => s_NextInstAddr
-  -- );
+    -- i_RegWr => s_Execute(71),
+    -- i_RegWrEx => s_Decode(132),
+    i_RegWr => s_Execute(72),
+    i_RegWrEx => s_Decode(142),
+    i_J => s_PCJump,
+    i_BranchYesOrNo => s_BranchYesorNo,
+    o_Flush => s_Flush,
+    o_Stall => s_Stall
+  );
   RegisterFile : mips_reg_file
   PORT MAP(
     i_CLK => iCLK, -- Clock Input
@@ -344,12 +342,19 @@ BEGIN
     o_Lui => s_LuiIndex
   );
 
+  s_NotAndi <= '1' WHEN (NOT (s_Fetch(31 DOWNTO 26) = "001100" OR s_Fetch(31 DOWNTO 26) = "001101" OR s_Fetch(31 DOWNTO 26) = "001110")) ELSE
+    '0';
+  -- s_Extender <= '0' WHEN (s_Fetch(15) = '1' AND s_NotAndi = '1') ELSE
+  --   s_Unsigned;
+
   SignExtender : bit_width_extender
   PORT MAP(
     signedval => s_Unsigned,
     i_in => s_Fetch(15 DOWNTO 0),
-    o_out => s_ImmTemp);
+    o_out => s_SignExtender);
 
+  s_ImmTemp <= X"FFFF" & s_Fetch(15 DOWNTO 0) WHEN s_Unsigned = '1' AND s_Fetch(15) = '1' AND s_NotAndi = '1' ELSE
+    s_SignExtender;
   s_BranchTemp <= s_ImmTemp(29 DOWNTO 0) & "00";
 
   branchAddress : fulladder_N
@@ -412,32 +417,39 @@ BEGIN
     o_O => s_TargetAddress
   );
 
+  s_DecodeValues(31 DOWNTO 0) <= s_Fetch(31 DOWNTO 0);
+  s_DecodeValues(63 DOWNTO 32) <= s_Fetch(63 DOWNTO 32);
+  s_DecodeValues(95 DOWNTO 64) <= s_AluRsInput;
+  s_DecodeValues(127 DOWNTO 96) <= s_AluRtInput;
+  s_DecodeValues(128) <= s_RegDst;
+  s_DecodeValues(129) <= s_J;
+  s_DecodeValues(131 DOWNTO 130) <= s_Branch;
+  s_DecodeValues(132) <= s_MemToReg;
+  s_DecodeValues(136 DOWNTO 133) <= s_AluOp;
+  s_DecodeValues(137) <= s_DMemWrTemp;
+  s_DecodeValues(138) <= s_AluSrc;
+  s_DecodeValues(139) <= s_Unsigned;
+  s_DecodeValues(140) <= s_Jr;
+  s_DecodeValues(141) <= s_Jal;
+  s_DecodeValues(142) <= s_RegWrDecode;
+  s_DecodeValues(143) <= s_HaltTemp;
+  s_DecodeValues(144) <= s_LuiIndex;
+  s_DecodeValues(176 DOWNTO 145) <= s_ImmTemp;
+
+  s_DecodeTemp <= (OTHERS => '0') WHEN s_StallExtend = '1'
+    ELSE
+    s_DecodeValues;
+
   Decode : n_bit_reg
   GENERIC MAP(N => 177)
   PORT MAP(
-    i_D (31 DOWNTO 0) => s_Fetch(31 DOWNTO 0),
-    i_D(63 DOWNTO 32) => s_Fetch(63 DOWNTO 32),
-    i_D(95 DOWNTO 64) => s_AluRsInput,
-    i_D(127 DOWNTO 96) => s_AluRtInput,
-    i_D(128) => s_RegDst,
-    i_D(129) => s_J,
-    i_D(131 DOWNTO 130) => s_Branch,
-    i_D(132) => s_MemToReg,
-    i_D(136 DOWNTO 133) => s_AluOp,
-    i_D(137) => s_DMemWrTemp,
-    i_D(138) => s_AluSrc,
-    i_D(139) => s_Unsigned,
-    i_D(140) => s_Jr,
-    i_D(141) => s_Jal,
-    i_D(142) => s_RegWrDecode,
-    i_D(143) => s_HaltTemp,
-    i_D(144) => s_LuiIndex,
-    i_D(176 DOWNTO 145) => s_ImmTemp,
+    i_D => s_DecodeTemp,
     i_RST => iRST,
     i_CLK => iCLK,
     i_WE => '1',
     o_Q => s_Decode
   );
+
   --EX Stage
   RtorRd : mux2t1_N
   GENERIC MAP(N => 5)
@@ -456,7 +468,6 @@ BEGIN
     i_S => s_Decode(141),
     o_O => s_RegDest
   );
-
   ALUnit : ALU
   PORT MAP(
     i_RSDATA => s_Decode(95 DOWNTO 64),
@@ -465,19 +476,21 @@ BEGIN
     i_ALUOP => s_Decode(136 DOWNTO 133),
     i_ALUSRC => s_Decode(138),
     i_SHAMT => s_Decode(10 DOWNTO 6),
-    o_RESULT => oALUOut,
-    o_CARRYOUT => s_Cout,
-    o_OVERFLOW => s_Ovfl,
+    o_RESULT => s_AluOutTemp,
+    o_CARRYOUT => OPEN,
+    o_OVERFLOW => OPEN,
     o_ZERO => OPEN -- used for branch comparison
   );
   JalWrite : mux2t1_N
   GENERIC MAP(N => 32)
   PORT MAP(
-    i_D0 => oALUOut,
+    i_D0 => s_AluOutTemp,
     i_D1 => s_Decode(63 DOWNTO 32),
     i_S => s_Decode(141),
     o_O => s_RegData
   );
+
+  oALUOut <= s_AluOutTemp;
 
   Execute : n_bit_reg
   GENERIC MAP(N => 106)
@@ -511,18 +524,19 @@ BEGIN
     we => s_DMemWr,
     q => s_DMemOut);
 
-  MemToReg : mux2t1_N
-  GENERIC MAP(N => 32)
-  PORT MAP(
-    i_S => s_Execute(70),
-    i_D0 => s_Execute(31 DOWNTO 0),
-    i_D1 => s_Execute(63 DOWNTO 32),
-    o_O => s_LuiOrData);
+  -- MemToReg : mux2t1_N
+  -- GENERIC MAP(N => 32)
+  -- PORT MAP(
+  --   i_S => s_Execute(70),
+  --   i_D0 => s_Execute(31 DOWNTO 0),
+  --   i_D1 => s_Execute(63 DOWNTO 32),
+  --   o_O => s_LuiOrData);
 
   memtoreg2 : mux2t1_N
   PORT MAP(
     i_S => s_Execute(71),
-    i_D0 => s_LuiOrData,
+    -- i_D0 => s_LuiOrData,
+    i_D0 => s_DMemAddr, --aluout
     i_D1 => s_DMemOut,
     o_O => s_MemToRegData
   );

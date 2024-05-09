@@ -20,8 +20,7 @@ outer_loop:
 	nop
     bne $t7, $zero, exit        # Exit if array is empty
 	nop
-nop
-nop
+    nop
     #la $a0, Arr           # Load array address
     lui $a0, 0x1001
 
@@ -32,7 +31,6 @@ nop
     nop
 
     beq $t1, $zero, exit        # Exit if no swaps occurred
-	nop
 	nop
 	nop
 
@@ -63,8 +61,7 @@ inner_loop:
 nop
     bne $t6, $zero, swap
 	nop
-nop
-nop
+    nop
 
     addi $a0, $a0, 4     # Move to next element
     addi $t2, $t2, -1    # Decrement loop counter
@@ -72,7 +69,6 @@ nop
     nop
     nop
     bne $t2, $zero inner_loop # Continue inner loop
-    nop
     nop
     nop
     jr $ra               # Return from function
@@ -84,5 +80,5 @@ swap:
     sw $s0, 4($a0)       # Store first element at next position
     addi $t1, $zero, 1   # Set swap flag
     jr $ra               # Return from function
-nop
-nop
+    nop
+    nop

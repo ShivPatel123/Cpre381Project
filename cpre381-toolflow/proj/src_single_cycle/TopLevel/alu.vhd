@@ -11,7 +11,6 @@ ENTITY ALU IS
         i_ALUSRC : IN STD_LOGIC;
         i_SHAMT : IN STD_LOGIC_VECTOR(4 DOWNTO 0);
         o_RESULT : OUT STD_LOGIC_VECTOR(31 DOWNTO 0);
-        o_CARRYOUT : OUT STD_LOGIC;
         o_OVERFLOW : OUT STD_LOGIC;
         o_ZERO : OUT STD_LOGIC
     );
@@ -108,7 +107,7 @@ BEGIN
         -- i_Unsigned => i_UNSIGNED,
         i_ALUSrc => i_ALUSRC,
         o_sum => s_ADD_RESULT,
-        o_cout => s_ADD_COUT
+        o_cout => o_OVERFLOW
     );
 
     SubOps : addersubtractor_N
@@ -300,8 +299,6 @@ BEGIN
         s_SRA_RESULT WHEN "1010",
         "00000000000000000000000000000000" WHEN OTHERS; -- Default value
 
-    o_CARRYOUT <= s_ADD_COUT; -- Default value
-    o_OVERFLOW <= '0'; -- Default value
     o_ZERO <= s_ZERO; -- Default value
 
 END structural;

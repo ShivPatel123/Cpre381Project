@@ -366,7 +366,7 @@ BEGIN
                 o_ALUSrc <= '1';
                 o_RegWrite <= '1';
                 o_RegDst <= '0';
-                o_Unsigned <= '0';
+                o_Unsigned <= '1';
                 o_AxMOut <= '0';
                 o_MemWrite <= '0';
                 o_Branch <= "00";
@@ -382,7 +382,7 @@ BEGIN
                 o_ALUSrc <= '1';
                 o_RegWrite <= '1';
                 o_RegDst <= '0';
-                o_Unsigned <= '0';
+                o_Unsigned <= '1';
                 o_AxMOut <= '0';
                 o_MemWrite <= '0';
                 o_Branch <= "00";

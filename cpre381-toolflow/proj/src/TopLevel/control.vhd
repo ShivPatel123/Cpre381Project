@@ -511,7 +511,7 @@ BEGIN
                 o_RegWrite <= '0';
                 o_RegDst <= '0';
                 o_Unsigned <= '0';
-                o_AxMOut <= '0';
+                o_AxMOut <= '1';
                 o_MemWrite <= '1';
                 o_Branch <= "00";
                 o_J <= '0';

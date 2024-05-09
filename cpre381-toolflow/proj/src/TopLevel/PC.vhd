@@ -46,7 +46,7 @@ BEGIN
     reg : n_bit_reg PORT MAP(
         i_Clk => i_CLK,
         i_RST => '0',
-        i_WE => '1',
+        i_WE => i_WE,
         i_D => s_data,
         o_Q => o_ADDRESS);
 

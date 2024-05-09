@@ -55,7 +55,7 @@ ARCHITECTURE structure OF MIPS_Processor IS
   SIGNAL s_AluOp : STD_LOGIC_VECTOR(3 DOWNTO 0);
   SIGNAL s_Branch : STD_LOGIC_VECTOR(1 DOWNTO 0);
   --ALU file Signals
-  SIGNAL s_AluRsInput, s_AluRtInput, s_ImmTemp, s_MUXOUT, s_UnmaskedLui, s_Lower, s_Lui, s_LuiAddress : STD_LOGIC_VECTOR(N - 1 DOWNTO 0);
+  SIGNAL s_AluRsInput, s_AluRtInput, s_ImmTemp, s_MUXOUT, s_UnmaskedLui, s_Lower, s_Lui, s_LuiAddress, s_LWData : STD_LOGIC_VECTOR(N - 1 DOWNTO 0);
   SIGNAL s_Cout, s_Zero, s_SWJ, s_NotAndi : STD_LOGIC;
 
   --fetch signals
@@ -96,7 +96,6 @@ ARCHITECTURE structure OF MIPS_Processor IS
       i_ALUSRC : IN STD_LOGIC;
       i_SHAMT : IN STD_LOGIC_VECTOR(4 DOWNTO 0);
       o_RESULT : OUT STD_LOGIC_VECTOR(31 DOWNTO 0);
-      o_CARRYOUT : OUT STD_LOGIC;
       o_OVERFLOW : OUT STD_LOGIC;
       o_ZERO : OUT STD_LOGIC
     );
@@ -230,7 +229,7 @@ BEGIN
 
   -- if unsigned is 1, check if it is negative and if it is set unsigned to 0 only if it is not andi instruction.
 
-  s_NotAndi <= '1' WHEN (NOT (s_Inst(31 DOWNTO 26) = "001100")) ELSE
+  s_NotAndi <= '1' WHEN (NOT (s_Inst(31 DOWNTO 26) = "001100" OR s_Inst(31 DOWNTO 26) = "001101" OR s_Inst(31 DOWNTO 26) = "001110")) ELSE
     '0';
   s_Extender <= '0' WHEN (s_Inst(15) = '1' AND s_NotAndi = '1') ELSE
     s_Unsigned;
@@ -250,8 +249,8 @@ BEGIN
     i_ALUSRC => s_AluSrc,
     i_SHAMT => s_Inst(10 DOWNTO 6),
     o_RESULT => s_DMemAddr,
-    o_CARRYOUT => s_Cout,
-    o_OVERFLOW => s_Ovfl,
+    -- o_OVERFLOW => s_Ovfl,
+    o_OVERFLOW => OPEN,
     o_ZERO => s_Zero
   );
 
@@ -270,12 +269,20 @@ BEGIN
     i_D1 => s_UnmaskedLui,
     o_O => s_LuiAddress);
 
+  s_LWData <= X"000000" & s_DMemOut(7 DOWNTO 0) WHEN s_Inst(31 DOWNTO 26) = "100100" ELSE
+    X"0000" & s_DMemOut(15 DOWNTO 0) WHEN s_Inst(31 DOWNTO 26) = "100101" ELSE
+    X"000000" & s_DMemOut(7 DOWNTO 0) WHEN s_Inst(31 DOWNTO 26) = "100000" AND s_DMemOut(7) = '0' ELSE
+    X"FFFFFF" & s_DMemOut (7 DOWNTO 0) WHEN s_Inst(31 DOWNTO 26) = "100000" AND s_DmemOut(7) = '1' ELSE
+    X"0000" & s_DMemOut(15 DOWNTO 0) WHEN s_Inst(31 DOWNTO 26) = "100001" AND s_DmemOut(15) = '0' ELSE
+    X"FFFF" & s_DMemOut(15 DOWNTO 0) WHEN s_Inst(31 DOWNTO 26) = "100001" AND s_DmemOut(15) = '1' ELSE
+    s_DMemOut;
+
   MemtoRegMux : mux2t1_N
   GENERIC MAP(N => 32)
   PORT MAP(
     i_S => s_MemToReg,
     i_D0 => s_LuiAddress,
-    i_D1 => s_DMemOut,
+    i_D1 => s_LWData,
     o_O => s_MUXOUT);
   ControlUnit : control
   PORT MAP(
